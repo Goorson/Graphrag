@@ -105,26 +105,6 @@ Wzór: `.env.example`
 
 **Uwaga:** Po przejściu z OpenAI uruchom aplikację ponownie — migracja `V002` czyści stare chunki i zmienia wymiar wektora na 768.
 
-## Problemy z buildem
-
-### `What went wrong: 26.0.1`
-
-Masz **Java 26**, a stary Gradle 8.x **nie może** na niej działać. Projekt używa teraz **Gradle 9.4.1** — zrób `git pull` (jeśli trzeba) i:
-
-```powershell
-.\gradlew.bat build
-```
-
-Przy pierwszym uruchomieniu pobierze Gradle 9.4.1 (jednorazowo).
-
-### Ostrzeżenia `System::load` / `native access`
-
-Na Java 26 to normalne. Są wyciszone w `gradle.properties`; możesz je zignorować.
-
-### Ostrzeżenie o JDK 21 przy buildzie
-
-Kod kompilujemy do **Java 21** (toolchain). Gradle 9.4 może automatycznie pobrać JDK 21 — przy pierwszym buildzie poczekaj dłużej.
-
 ## Etapy (dokumentacja)
 
 | Etap | Plik |
