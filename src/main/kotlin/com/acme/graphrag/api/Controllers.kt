@@ -7,7 +7,7 @@ import com.acme.graphrag.domain.RetrievalMode
 import com.acme.graphrag.repository.DocumentRepository
 import com.acme.graphrag.repository.QueryLogRepository
 import com.acme.graphrag.service.AskResult
-import com.acme.graphrag.service.RagService
+import com.acme.graphrag.service.graphrag.GraphRagService
 import com.acme.graphrag.service.SourceCitation
 import com.acme.graphrag.service.job.IngestJobService
 import com.acme.graphrag.service.job.JobCreated
@@ -91,24 +91,26 @@ class JobController(
 @RestController
 @RequestMapping("/api")
 class AskController(
-    private val ragService: RagService,
+    private val graphRagService: GraphRagService,
 ) {
 
     @PostMapping("/ask")
     fun ask(
         @Valid @RequestBody request: AskRequest,
-        @RequestParam(required = false, defaultValue = "hybrid") mode: String,
+        @RequestParam(required = false, defaultValue = "graph_rag") mode: String,
     ): AskResponse {
         val retrievalMode = parseMode(mode)
-        val result = ragService.ask(request.question, retrievalMode)
+        val result = graphRagService.ask(request.question, retrievalMode)
         return result.toResponse()
     }
 
     private fun parseMode(mode: String): RetrievalMode =
         when (mode.lowercase()) {
+            "graph_rag", "graphrag" -> RetrievalMode.GRAPH_RAG
             "vector" -> RetrievalMode.VECTOR
             "hybrid" -> RetrievalMode.HYBRID
-            else -> throw IllegalArgumentException("mode musi być: hybrid lub vector")
+            "graph" -> RetrievalMode.GRAPH
+            else -> throw IllegalArgumentException("mode musi być: graph_rag, hybrid, vector lub graph")
         }
 }
 
@@ -150,6 +152,7 @@ data class DocumentResponse(
     val path: String,
     val mimeType: String,
     val status: String,
+    val graphStatus: String,
     val contentHash: String?,
     val ingestedAt: Instant,
 )
@@ -183,8 +186,10 @@ data class JobDetailResponse(
 data class AskResponse(
     val answer: String,
     val sources: List<SourceResponse>,
+    val graphContext: GraphContextResponse?,
     val retrievalMode: String,
     val latencyMs: Long,
+    val degraded: Boolean = false,
 )
 
 data class SourceResponse(
@@ -211,6 +216,7 @@ private fun Document.toResponse() = DocumentResponse(
     path = path,
     mimeType = mimeType,
     status = status.name,
+    graphStatus = graphStatus.name,
     contentHash = contentHash,
     ingestedAt = ingestedAt,
 )
@@ -240,8 +246,10 @@ private fun IngestJob.toDetailResponse() = JobDetailResponse(
 private fun AskResult.toResponse() = AskResponse(
     answer = answer,
     sources = sources.map { it.toResponse() },
+    graphContext = graphContext?.toResponse(),
     retrievalMode = retrievalMode.name,
     latencyMs = latencyMs,
+    degraded = degraded,
 )
 
 private fun SourceCitation.toResponse() = SourceResponse(

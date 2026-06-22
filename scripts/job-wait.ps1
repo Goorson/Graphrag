@@ -15,6 +15,10 @@ while ((Get-Date) -lt $deadline) {
 
     if ($status.status -eq "DONE") {
         Write-Host "Gotowe. documentId=$($status.documentId)"
+        if ($status.documentId) {
+            $doc = Invoke-RestMethod -Method Get -Uri "$BaseUrl/api/documents/$($status.documentId)"
+            Write-Host "graphStatus=$($doc.graphStatus)"
+        }
         return $status
     }
     if ($status.status -eq "FAILED") {

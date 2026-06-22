@@ -26,6 +26,7 @@ dependencies {
     implementation("dev.langchain4j:langchain4j-ollama:0.36.2")
 
     implementation("org.apache.pdfbox:pdfbox:3.0.3")
+    implementation("org.neo4j.driver:neo4j-java-driver:5.26.0")
 
     runtimeOnly("org.postgresql:postgresql")
 

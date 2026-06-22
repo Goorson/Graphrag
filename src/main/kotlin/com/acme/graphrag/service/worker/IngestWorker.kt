@@ -1,7 +1,10 @@
 package com.acme.graphrag.service
 
+import com.acme.graphrag.domain.GraphStatus
 import com.acme.graphrag.domain.IngestJob
+import com.acme.graphrag.repository.DocumentRepository
 import com.acme.graphrag.repository.IngestJobRepository
+import com.acme.graphrag.service.graph.GraphIngestService
 import com.acme.graphrag.service.job.FolderIngestPayload
 import com.acme.graphrag.service.job.IngestQueueService
 import com.acme.graphrag.service.job.PathIngestPayload
@@ -18,6 +21,8 @@ class IngestWorker(
     private val ingestQueueService: IngestQueueService,
     private val ingestJobRepository: IngestJobRepository,
     private val ingestService: IngestService,
+    private val graphIngestService: GraphIngestService,
+    private val documentRepository: DocumentRepository,
     private val objectMapper: ObjectMapper,
     private val redis: org.springframework.data.redis.core.StringRedisTemplate,
 ) {
@@ -74,6 +79,7 @@ class IngestWorker(
             -> {
                 val payload = objectMapper.readValue(job.payloadJson, PathIngestPayload::class.java)
                 val result = ingestService.ingestFromPath(payload.path)
+                ingestGraphIfNeeded(result)
                 ingestJobRepository.updateDone(job.id, result.documentId, 100)
             }
             com.acme.graphrag.domain.IngestJobType.FOLDER_SCAN -> {
@@ -82,9 +88,29 @@ class IngestWorker(
                     val pct = if (total == 0) 100 else (done * 100 / total)
                     ingestJobRepository.updateProgress(job.id, pct)
                 }
+                results.forEach { ingestGraphIfNeeded(it) }
                 val lastDocId = results.lastOrNull()?.documentId
                 ingestJobRepository.updateDone(job.id, lastDocId, 100)
             }
+        }
+    }
+
+    private fun ingestGraphIfNeeded(result: IngestResult) {
+        val needsGraph = when {
+            !result.skipped -> true
+            else -> {
+                val doc = documentRepository.findById(result.documentId)
+                doc != null &&
+                    doc.graphStatus != GraphStatus.INDEXED &&
+                    doc.graphStatus != GraphStatus.SKIPPED
+            }
+        }
+        if (!needsGraph) return
+
+        try {
+            graphIngestService.ingestDocument(result.documentId)
+        } catch (ex: Exception) {
+            log.warn("graph_ingest_failed documentId={} error={}", result.documentId, ex.message)
         }
     }
 

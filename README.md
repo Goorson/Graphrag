@@ -9,11 +9,13 @@ Plan projektu w Kotlin + Spring Boot: RAG na plikach MD/PDF, graf w Neo4j, Graph
 | 0 — Hello RAG | **Zaimplementowany** |
 | 1 — Multi-doc RAG (MD + PDF, hybrid) | **Zaimplementowany** |
 | 2 — Async + Redis | **Zaimplementowany** |
-| 3–7 | Dokumentacja w `docs/etapy/` |
+| 3 — Neo4j (graf wiedzy) | **Zaimplementowany** |
+| 4 — GraphRAG | **Zaimplementowany** |
+| 5–7 | Dokumentacja w `docs/etapy/` |
 
 ## Stack
 
-Kotlin, Spring Boot 3, LangChain4j, **Ollama**, PostgreSQL + pgvector, Flyway.
+Kotlin, Spring Boot 3, LangChain4j, **Ollama**, PostgreSQL + pgvector, **Neo4j** (Person/Project/Concept/**Topic**), Redis, Flyway.
 
 ## Uruchomienie (Etap 0)
 
@@ -39,7 +41,7 @@ docker exec -it graphrag-knowledge-assistant-ollama-1 ollama pull nomic-embed-te
 ### 2. Postgres + Redis
 
 ```powershell
-docker compose -f docker/docker-compose.yml up -d postgres redis
+docker compose -f docker/docker-compose.yml up -d postgres redis neo4j
 ```
 
 ### 3. Aplikacja
@@ -81,6 +83,40 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/jobs/<jobId>/retry
 
 ```powershell
 .\scripts\ask.ps1 -Question "Kto jest tech leadem Project Alpha?"
+```
+
+Domyślnie `/api/ask` używa **GraphRAG** (graf + fragmenty dokumentów).
+
+| Tryb | Opis |
+|------|------|
+| `?mode=graph_rag` | domyślny — analiza intencji + graf + hybrid search |
+| `?mode=hybrid` | tylko vector + full-text (bez grafu) |
+| `?mode=vector` | tylko podobieństwo wektorowe |
+| `?mode=graph` | tylko struktura grafu (debug) |
+
+Graf (Neo4j Browser: http://localhost:7474):
+
+```powershell
+Invoke-RestMethod "http://localhost:8080/api/graph/entities?q=alpha&type=Project"
+Invoke-RestMethod "http://localhost:8080/api/graph/entities?q=edge&type=Concept"
+Invoke-RestMethod "http://localhost:8080/api/graph/entities/project:alpha/neighbors"
+```
+
+### Graf pod materiały studyjne
+
+Graf obsługuje **dwa światy** naraz:
+
+| Typ | Przykład | Relacje |
+|-----|----------|---------|
+| Firmowy | Person, Project | `WORKS_ON`, `DEPENDS_ON`, `ESCALATES` |
+| Studyjny | Concept, Topic | `RELATES_TO`, `COMPARES_WITH`, `PART_OF`, `DEFINES` |
+
+Po wrzuceniu PDF-ów wykładów przebuduj graf (ekstrakcja LLM per batch chunków):
+
+```powershell
+.\scripts\rebuild-graph-all.ps1
+# lub pojedynczy dokument:
+Invoke-RestMethod -Method Post "http://localhost:8080/api/graph/rebuild/<documentId>"
 ```
 
 PDF (po indeksie):

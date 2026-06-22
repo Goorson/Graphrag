@@ -8,9 +8,31 @@ enum class DocumentStatus {
     SKIPPED_OCR_REQUIRED,
 }
 
+enum class GraphStatus {
+    PENDING,
+    INDEXED,
+    FAILED,
+    SKIPPED,
+}
+
 enum class RetrievalMode {
+    GRAPH_RAG,
     HYBRID,
     VECTOR,
+    GRAPH,
+}
+
+enum class QueryType {
+    FACTUAL,
+    RELATIONAL,
+    HYBRID,
+}
+
+enum class GraphEntityType {
+    Person,
+    Project,
+    Concept,
+    Topic,
 }
 
 data class Document(
@@ -20,6 +42,7 @@ data class Document(
     val mimeType: String,
     val contentHash: String?,
     val status: DocumentStatus,
+    val graphStatus: GraphStatus = GraphStatus.PENDING,
     val ingestedAt: Instant,
 )
 

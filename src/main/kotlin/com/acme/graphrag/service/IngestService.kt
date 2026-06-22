@@ -2,6 +2,7 @@ package com.acme.graphrag.service
 
 import com.acme.graphrag.domain.Document
 import com.acme.graphrag.domain.DocumentStatus
+import com.acme.graphrag.domain.GraphStatus
 import com.acme.graphrag.domain.TextChunk
 import com.acme.graphrag.repository.ChunkRepository
 import com.acme.graphrag.repository.DocumentRepository
@@ -117,6 +118,7 @@ class IngestService(
                     mimeType = "application/pdf",
                     contentHash = contentHash,
                     status = DocumentStatus.SKIPPED_OCR_REQUIRED,
+                    graphStatus = GraphStatus.SKIPPED,
                     ingestedAt = Instant.now(),
                 ),
             )

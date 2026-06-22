@@ -27,3 +27,7 @@ app:
   ingest:
     stale-job-minutes: 30
     queue-key: ingest:queue
+  neo4j:
+    uri: ${NEO4J_URI:bolt://localhost:7687}
+    username: ${NEO4J_USERNAME:neo4j}
+    password: ${NEO4J_PASSWORD:changeme}

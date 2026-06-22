@@ -13,15 +13,26 @@ class HybridRetrievalService(
     private val ragProperties: RagProperties,
 ) {
 
-    fun retrieve(queryEmbedding: FloatArray, question: String, mode: RetrievalMode): List<ChunkSearchResult> =
+    fun retrieve(
+        queryEmbedding: FloatArray,
+        question: String,
+        mode: RetrievalMode,
+        documentIds: List<UUID>? = null,
+    ): List<ChunkSearchResult> =
         when (mode) {
-            RetrievalMode.VECTOR -> chunkRepository.searchSimilar(queryEmbedding, ragProperties.topK)
-            RetrievalMode.HYBRID -> hybridSearch(queryEmbedding, question)
+            RetrievalMode.VECTOR -> chunkRepository.searchSimilar(queryEmbedding, ragProperties.topK, documentIds)
+            RetrievalMode.HYBRID -> hybridSearch(queryEmbedding, question, documentIds)
+            RetrievalMode.GRAPH_RAG -> hybridSearch(queryEmbedding, question, documentIds)
+            RetrievalMode.GRAPH -> emptyList()
         }
 
-    private fun hybridSearch(queryEmbedding: FloatArray, question: String): List<ChunkSearchResult> {
-        val vectorHits = chunkRepository.searchSimilar(queryEmbedding, ragProperties.candidateK)
-        val keywordHits = chunkRepository.searchKeyword(question, ragProperties.candidateK)
+    private fun hybridSearch(
+        queryEmbedding: FloatArray,
+        question: String,
+        documentIds: List<UUID>? = null,
+    ): List<ChunkSearchResult> {
+        val vectorHits = chunkRepository.searchSimilar(queryEmbedding, ragProperties.candidateK, documentIds)
+        val keywordHits = chunkRepository.searchKeyword(question, ragProperties.candidateK, documentIds)
 
         val scores = mutableMapOf<UUID, Double>()
         val byId = mutableMapOf<UUID, ChunkSearchResult>()

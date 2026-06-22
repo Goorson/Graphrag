@@ -1,5 +1,6 @@
 package com.acme.graphrag.service
 
+import com.acme.graphrag.domain.GraphContext
 import com.acme.graphrag.domain.RetrievalMode
 import com.acme.graphrag.repository.QueryLogRepository
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -18,7 +19,11 @@ class RagService(
     private val objectMapper: ObjectMapper,
 ) {
 
-    fun ask(question: String, mode: RetrievalMode = RetrievalMode.HYBRID): AskResult {
+    fun ask(
+        question: String,
+        mode: RetrievalMode = RetrievalMode.HYBRID,
+        persistLog: Boolean = true,
+    ): AskResult {
         val trimmedQuestion = question.trim()
         require(trimmedQuestion.isNotEmpty()) { "Pytanie nie może być puste" }
 
@@ -70,7 +75,9 @@ class RagService(
         }
 
         val finalResult = result.copy(latencyMs = latencyMs)
-        logQuery(trimmedQuestion, finalResult)
+        if (persistLog) {
+            logQuery(trimmedQuestion, finalResult)
+        }
         return finalResult
     }
 
@@ -134,6 +141,8 @@ data class AskResult(
     val sources: List<SourceCitation>,
     val retrievalMode: RetrievalMode,
     val latencyMs: Long,
+    val graphContext: GraphContext? = null,
+    val degraded: Boolean = false,
 )
 
 data class SourceCitation(

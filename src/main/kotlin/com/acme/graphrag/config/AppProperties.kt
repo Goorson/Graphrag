@@ -21,3 +21,10 @@ data class IngestProperties(
     val staleJobMinutes: Long = 30,
     val queueKey: String = "ingest:queue",
 )
+
+@ConfigurationProperties(prefix = "app.neo4j")
+data class Neo4jProperties(
+    val uri: String = "bolt://localhost:7687",
+    val username: String = "neo4j",
+    val password: String = "changeme",
+)

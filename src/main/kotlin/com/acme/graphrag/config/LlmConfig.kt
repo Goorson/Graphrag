@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Configuration
 import java.time.Duration
 
 @Configuration
-@EnableConfigurationProperties(LlmProperties::class, RagProperties::class, IngestProperties::class)
+@EnableConfigurationProperties(LlmProperties::class, RagProperties::class, IngestProperties::class, Neo4jProperties::class)
 class LlmConfig(
     private val llmProperties: LlmProperties,
 ) {
