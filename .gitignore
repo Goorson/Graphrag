@@ -1,0 +1,24 @@
+# .gitignore
+
+# Gradle / build
+build/
+.gradle/
+out/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Env & uploads
+.env
+.env.local
+uploads/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

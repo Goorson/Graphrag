@@ -1,0 +1,29 @@
+spring:
+  application:
+    name: graphrag-knowledge-assistant
+  datasource:
+    url: jdbc:postgresql://localhost:5432/graphrag
+    username: graphrag
+    password: changeme
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: 8080
+
+app:
+  llm:
+    base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    chat-model: ${OLLAMA_CHAT_MODEL:llama3.2}
+    embedding-model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
+    embedding-dimension: 768
+  rag:
+    top-k: 7
+    candidate-k: 10
+  ingest:
+    stale-job-minutes: 30
+    queue-key: ingest:queue
