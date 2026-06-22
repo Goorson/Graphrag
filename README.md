@@ -11,7 +11,9 @@ Plan projektu w Kotlin + Spring Boot: RAG na plikach MD/PDF, graf w Neo4j, Graph
 | 2 — Async + Redis | **Zaimplementowany** |
 | 3 — Neo4j (graf wiedzy) | **Zaimplementowany** |
 | 4 — GraphRAG | **Zaimplementowany** |
-| 5–7 | Dokumentacja w `docs/etapy/` |
+| 5 — Agent (chat + tools) | **Zaimplementowany** |
+| 6 — Production hardening | **Zaimplementowany** |
+| 7 — Deploy (opcjonalny) | Dokumentacja w `docs/etapy/` |
 
 ## Stack
 
@@ -53,6 +55,19 @@ Wymagania: **Java 21+** (działa z JDK 26 + Gradle 9.4).
 .\gradlew.bat bootRun
 ```
 
+### Interfejs webowy
+
+Po starcie aplikacji otwórz w przeglądarce:
+
+**http://localhost:8080**
+
+Interfejs oferuje:
+- czat z agentem (pamięć sesji, follow-up),
+- wrzucanie plików PDF i MD (drag-and-drop lub przycisk),
+- listę dokumentów ze statusem indeksacji i grafu.
+
+Pliki statyczne: `src/main/resources/static/`.
+
 ### 4. Indeks dokumentu (async — zwraca 202 + jobId)
 
 Indeksowanie działa **w tle**. Skrypt sam czeka na DONE:
@@ -86,6 +101,34 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/jobs/<jobId>/retry
 ```
 
 Domyślnie `/api/ask` używa **GraphRAG** (graf + fragmenty dokumentów).
+
+### 6. Agent konwersacyjny (Etap 5)
+
+Sesja z pamięcią i narzędziami (`searchDocuments`, `queryGraph`, `getDocumentChunk`, `getEntityDetails`):
+
+```powershell
+.\scripts\chat.ps1 -Question "Kto prowadzi Alpha i jakie są główne ryzyka?"
+```
+
+API:
+
+```powershell
+$s = Invoke-RestMethod -Method Post http://localhost:8080/api/chat/sessions -ContentType application/json -Body "{}"
+Invoke-RestMethod -Method Post "http://localhost:8080/api/chat/sessions/$($s.id)/messages" -ContentType application/json -Body '{"content":"Kto eskaluje Project Alpha?"}'
+Invoke-RestMethod "http://localhost:8080/api/chat/sessions/$($s.id)/steps"
+```
+
+### 7. Pełny Docker (Etap 6)
+
+```powershell
+cp .env.example .env
+docker compose -f docker/docker-compose.yml up -d --build
+```
+
+Health: `http://localhost:8080/actuator/health/readiness`  
+Metryki: `http://localhost:8080/actuator/prometheus`
+
+Gdy Neo4j jest niedostępny, `/api/ask` działa w trybie wektorowym z `"degraded": true`.
 
 | Tryb | Opis |
 |------|------|

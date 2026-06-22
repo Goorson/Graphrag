@@ -4,7 +4,8 @@ import com.acme.graphrag.domain.GraphContext
 import com.acme.graphrag.domain.GraphRelationship
 import com.acme.graphrag.domain.QueryType
 import com.acme.graphrag.domain.RetrievalMode
-import com.acme.graphrag.repository.QueryLogRepository
+import com.acme.graphrag.config.LlmGateway
+import com.acme.graphrag.config.Neo4jAvailability
 import com.acme.graphrag.service.AskResult
 import com.acme.graphrag.service.EmbeddingService
 import com.acme.graphrag.service.HybridRetrievalService
@@ -12,7 +13,8 @@ import com.acme.graphrag.service.RagService
 import com.acme.graphrag.service.SourceCitation
 import com.acme.graphrag.service.graph.GraphRetrievalService
 import com.fasterxml.jackson.databind.ObjectMapper
-import dev.langchain4j.model.chat.ChatLanguageModel
+import com.acme.graphrag.repository.QueryLogRepository
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Service
 import java.util.UUID
 import kotlin.system.measureTimeMillis
@@ -24,10 +26,12 @@ class GraphRagService(
     private val hybridRetrievalService: HybridRetrievalService,
     private val embeddingService: EmbeddingService,
     private val contextBuilder: ContextBuilder,
-    private val chatLanguageModel: ChatLanguageModel,
+    private val llmGateway: LlmGateway,
     private val queryLogRepository: QueryLogRepository,
     private val ragService: RagService,
     private val objectMapper: ObjectMapper,
+    private val neo4jAvailability: Neo4jAvailability,
+    private val meterRegistry: MeterRegistry,
 ) {
 
     fun ask(question: String, mode: RetrievalMode): AskResult {
@@ -40,6 +44,7 @@ class GraphRagService(
 
     private fun graphRag(question: String): AskResult {
         val trimmedQuestion = question.trim()
+        meterRegistry.counter("ask.requests.total", "mode", RetrievalMode.GRAPH_RAG.name).increment()
         val analysis = queryAnalyzer.analyze(trimmedQuestion)
 
         lateinit var result: AskResult
@@ -51,10 +56,17 @@ class GraphRagService(
             }
         }
 
-        val finalResult = result.copy(latencyMs = latencyMs)
+        val finalResult = withDegradedIfNeeded(result.copy(latencyMs = latencyMs))
+        meterRegistry.timer("ask.latency", "mode", RetrievalMode.GRAPH_RAG.name).record(latencyMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        if (finalResult.sources.isEmpty() && finalResult.answer.contains("Nie znalazłem")) {
+            meterRegistry.counter("ask.sources.empty", "mode", RetrievalMode.GRAPH_RAG.name).increment()
+        }
         logQuery(trimmedQuestion, finalResult)
         return finalResult
     }
+
+    private fun withDegradedIfNeeded(result: AskResult): AskResult =
+        if (neo4jAvailability.degraded) result.copy(degraded = true) else result
 
     private fun factualGraphRag(question: String, analysis: com.acme.graphrag.domain.QueryAnalysis): AskResult {
         val ragResult = ragService.ask(question, RetrievalMode.HYBRID, persistLog = false)
@@ -114,7 +126,7 @@ class GraphRagService(
             Pytanie: $question
             """.trimIndent()
 
-        val answer = chatLanguageModel.generate(prompt).trim()
+        val answer = llmGateway.generate(prompt).trim()
         val result = AskResult(
             answer = answer,
             sources = emptyList(),
@@ -174,14 +186,16 @@ class GraphRagService(
         }
 
         val prompt = contextBuilder.buildPrompt(graphContext, sources, matches, question)
-        val answer = chatLanguageModel.generate(prompt).trim()
+        val answer = llmGateway.generate(prompt).trim()
 
-        return AskResult(
-            answer = answer,
-            sources = sources,
-            retrievalMode = mode,
-            latencyMs = 0,
-            graphContext = graphContext,
+        return withDegradedIfNeeded(
+            AskResult(
+                answer = answer,
+                sources = sources,
+                retrievalMode = mode,
+                latencyMs = 0,
+                graphContext = graphContext,
+            ),
         )
     }
 
@@ -203,7 +217,7 @@ class GraphRagService(
             Pytanie: $question
             """.trimIndent()
 
-        val answer = chatLanguageModel.generate(prompt).trim()
+        val answer = llmGateway.generate(prompt).trim()
         return AskResult(
             answer = answer,
             sources = emptyList(),

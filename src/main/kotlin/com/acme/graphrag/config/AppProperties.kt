@@ -28,3 +28,16 @@ data class Neo4jProperties(
     val username: String = "neo4j",
     val password: String = "changeme",
 )
+
+@ConfigurationProperties(prefix = "app.rate-limit")
+data class RateLimitProperties(
+    val enabled: Boolean = true,
+    val askPerMinute: Int = 30,
+    val ingestPerMinute: Int = 10,
+    val chatPerMinute: Int = 30,
+)
+
+@ConfigurationProperties(prefix = "app.security")
+data class SecurityProperties(
+    val apiKey: String? = null,
+)

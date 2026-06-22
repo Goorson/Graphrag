@@ -1,10 +1,14 @@
 spring:
   application:
     name: graphrag-knowledge-assistant
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
   datasource:
-    url: jdbc:postgresql://localhost:5432/graphrag
-    username: graphrag
-    password: changeme
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/graphrag
+    username: ${POSTGRES_USER:graphrag}
+    password: ${POSTGRES_PASSWORD:changeme}
   flyway:
     enabled: true
   data:
@@ -14,6 +18,41 @@ spring:
 
 server:
   port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      llm:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        sliding-window-size: 10
+      neo4j:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        sliding-window-size: 10
+  retry:
+    instances:
+      llm:
+        max-attempts: 3
+        wait-duration: 1s
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
 
 app:
   llm:
@@ -31,3 +70,16 @@ app:
     uri: ${NEO4J_URI:bolt://localhost:7687}
     username: ${NEO4J_USERNAME:neo4j}
     password: ${NEO4J_PASSWORD:changeme}
+  agent:
+    max-steps: 8
+    memory-window: 10
+    timeout-seconds: 120
+  rate-limit:
+    enabled: true
+    ask-per-minute: 30
+    ingest-per-minute: 10
+    chat-per-minute: 30
+  security:
+    api-key: ${API_KEY:}
+  health:
+    llm-enabled: false

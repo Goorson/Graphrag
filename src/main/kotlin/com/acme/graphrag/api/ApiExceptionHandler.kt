@@ -1,5 +1,8 @@
 package com.acme.graphrag.api
 
+import com.acme.graphrag.config.RecoverableAiException
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.MethodArgumentNotValidException
@@ -17,6 +20,15 @@ class ApiExceptionHandler {
     fun handleValidation(ex: MethodArgumentNotValidException): ResponseEntity<ErrorResponse> {
         val message = ex.bindingResult.fieldErrors.joinToString { "${it.field}: ${it.defaultMessage}" }
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ErrorResponse(message))
+    }
+
+    @ExceptionHandler(RecoverableAiException::class, CallNotPermittedException::class)
+    fun handleAiUnavailable(ex: Exception): ResponseEntity<ErrorResponse> {
+        val headers = HttpHeaders()
+        headers.add(HttpHeaders.RETRY_AFTER, "30")
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .headers(headers)
+            .body(ErrorResponse("AI service temporarily unavailable"))
     }
 
     @ExceptionHandler(Exception::class)

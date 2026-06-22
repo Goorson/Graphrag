@@ -243,6 +243,30 @@ class ChunkRepository(
     fun count(): Int =
         jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunks", Int::class.java) ?: 0
 
+    fun findById(chunkId: UUID): ChunkSearchResult? =
+        jdbcTemplate.query(
+            """
+            SELECT c.id, c.document_id, c.content, c.section, c.page, d.path AS filename,
+                   1.0 AS score
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.id = ?
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ ->
+                ChunkSearchResult(
+                    chunkId = rs.getObject("id", UUID::class.java),
+                    documentId = rs.getObject("document_id", UUID::class.java),
+                    content = rs.getString("content"),
+                    section = rs.getString("section"),
+                    page = rs.getObject("page")?.let { (it as Number).toInt() },
+                    filename = rs.getString("filename"),
+                    score = rs.getDouble("score"),
+                )
+            },
+            chunkId,
+        ).firstOrNull()
+
     private fun documentFilterClause(documentIds: List<UUID>?): String =
         if (documentIds.isNullOrEmpty()) "" else "AND c.document_id = ANY(?::uuid[])"
 

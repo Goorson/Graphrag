@@ -1,11 +1,13 @@
 package com.acme.graphrag.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Component
 
 @Component
 class StructuredOutputHandler(
     private val objectMapper: ObjectMapper,
+    private val meterRegistry: MeterRegistry,
 ) {
 
     fun stripMarkdownFence(raw: String): String {
@@ -29,7 +31,9 @@ class StructuredOutputHandler(
                 return objectMapper.readValue(cleaned, type)
             } catch (ex: Exception) {
                 lastError = ex
+                meterRegistry.counter("llm.json.parse.errors").increment()
                 if (attempt < maxAttempts - 1) {
+                    meterRegistry.counter("llm.json.parse.retries").increment()
                     raw = fetch("Popraw JSON. Błąd: ${ex.message}. Zwróć tylko poprawny JSON.")
                 }
             }

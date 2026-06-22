@@ -1,12 +1,14 @@
 package com.acme.graphrag.service
 
+import com.acme.graphrag.config.LlmGateway
 import com.acme.graphrag.domain.GraphContext
 import com.acme.graphrag.domain.RetrievalMode
 import com.acme.graphrag.repository.QueryLogRepository
 import com.fasterxml.jackson.databind.ObjectMapper
-import dev.langchain4j.model.chat.ChatLanguageModel
+import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Service
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.system.measureTimeMillis
 
 @Service
@@ -15,10 +17,10 @@ class RagService(
     private val hybridRetrievalService: HybridRetrievalService,
     private val queryLogRepository: QueryLogRepository,
     private val chunkRepository: com.acme.graphrag.repository.ChunkRepository,
-    private val chatLanguageModel: ChatLanguageModel,
+    private val llmGateway: LlmGateway,
     private val objectMapper: ObjectMapper,
+    private val meterRegistry: MeterRegistry,
 ) {
-
     fun ask(
         question: String,
         mode: RetrievalMode = RetrievalMode.HYBRID,
@@ -38,10 +40,12 @@ class RagService(
 
         lateinit var result: AskResult
         val latencyMs = measureTimeMillis {
+            meterRegistry.counter("ask.requests.total", "mode", mode.name).increment()
             val queryEmbedding = embeddingService.embedOne(trimmedQuestion)
             val matches = hybridRetrievalService.retrieve(queryEmbedding, trimmedQuestion, mode)
 
             if (matches.isEmpty()) {
+                meterRegistry.counter("ask.sources.empty", "mode", mode.name).increment()
                 result = AskResult(
                     answer = "Nie znalazłem tej informacji w dokumentach.",
                     sources = emptyList(),
@@ -64,8 +68,7 @@ class RagService(
 
             val contextBlock = buildContextBlock(sources, matches)
             val prompt = buildPrompt(contextBlock, trimmedQuestion)
-            val answer = chatLanguageModel.generate(prompt)
-
+            val answer = llmGateway.generate(prompt)
             result = AskResult(
                 answer = answer.trim(),
                 sources = sources,
@@ -75,6 +78,7 @@ class RagService(
         }
 
         val finalResult = result.copy(latencyMs = latencyMs)
+        meterRegistry.timer("ask.latency", "mode", mode.name).record(latencyMs, TimeUnit.MILLISECONDS)
         if (persistLog) {
             logQuery(trimmedQuestion, finalResult)
         }

@@ -1,24 +1,24 @@
 package com.acme.graphrag.service.graph
 
+import com.acme.graphrag.config.LlmGateway
 import com.acme.graphrag.config.StructuredOutputHandler
 import com.acme.graphrag.domain.ExtractionResult
-import dev.langchain4j.model.chat.ChatLanguageModel
 import org.springframework.stereotype.Service
 
 @Service
 class EntityExtractionService(
-    private val chatLanguageModel: ChatLanguageModel,
+    private val llmGateway: LlmGateway,
     private val structuredOutputHandler: StructuredOutputHandler,
 ) {
 
     fun extract(documentText: String, documentKind: String = "dokument"): ExtractionResult {
         val prompt = buildPrompt(documentText, documentKind)
         return structuredOutputHandler.parseWithRetry(
-            initialRaw = chatLanguageModel.generate(prompt),
+            initialRaw = llmGateway.generate(prompt),
             type = ExtractionResult::class.java,
             maxAttempts = 3,
         ) { repairPrompt ->
-            chatLanguageModel.generate("$prompt\n\n$repairPrompt")
+            llmGateway.generate("$prompt\n\n$repairPrompt")
         }
     }
 

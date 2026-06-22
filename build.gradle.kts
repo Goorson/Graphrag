@@ -28,6 +28,11 @@ dependencies {
     implementation("org.apache.pdfbox:pdfbox:3.0.3")
     implementation("org.neo4j.driver:neo4j-java-driver:5.26.0")
 
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-aop")
+    implementation("io.micrometer:micrometer-registry-prometheus")
+    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
+
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
