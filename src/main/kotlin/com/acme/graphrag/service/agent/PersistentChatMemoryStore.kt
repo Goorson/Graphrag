@@ -19,7 +19,7 @@ class PersistentChatMemoryStore(
     override fun getMessages(memoryId: Any): List<ChatMessage> {
         val sessionId = UUID.fromString(memoryId.toString())
         return sessionMessageRepository.findBySessionId(sessionId)
-            .filter { it.role == SessionMessageRole.USER || it.role == SessionMessageRole.ASSISTANT }
+            .filter { it.role == SessionMessageRole.USER || it.role == SessionMessageRole.ASSISTANT || it.role == SessionMessageRole.SYSTEM }
             .filter { message ->
                 message.role != SessionMessageRole.ASSISTANT ||
                     !message.content.contains("toolName =")
@@ -29,8 +29,8 @@ class PersistentChatMemoryStore(
 
     override fun updateMessages(memoryId: Any, messages: List<ChatMessage>) {
         val sessionId = UUID.fromString(memoryId.toString())
-        val existingCount = sessionMessageRepository.countBySessionId(sessionId)
-        val newMessages = messages.drop(existingCount)
+        val persistedCount = persistedMessageCount(sessionId)
+        val newMessages = messages.drop(persistedCount)
         newMessages.forEach { message ->
             if (shouldSkipMessage(message)) return@forEach
             val role = toRole(message)
@@ -49,6 +49,15 @@ class PersistentChatMemoryStore(
     override fun deleteMessages(memoryId: Any) {
         // Brak endpointu czyszczenia sesji — no-op
     }
+
+    private fun persistedMessageCount(sessionId: UUID): Int =
+        sessionMessageRepository.findBySessionId(sessionId)
+            .count { message ->
+                (message.role == SessionMessageRole.USER ||
+                    message.role == SessionMessageRole.ASSISTANT ||
+                    message.role == SessionMessageRole.SYSTEM) &&
+                    (message.role != SessionMessageRole.ASSISTANT || !message.content.contains("toolName ="))
+            }
 
     private fun shouldSkipMessage(message: ChatMessage): Boolean {
         when (message) {

@@ -3,6 +3,7 @@ package com.acme.graphrag.config
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
+import org.slf4j.LoggerFactory
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -28,6 +29,11 @@ class ApiKeyFilter(
             return
         }
 
+        if (request.requestURI == "/api/ui-config") {
+            filterChain.doFilter(request, response)
+            return
+        }
+
         val provided = request.getHeader("X-API-Key")
         if (provided != requiredKey) {
             response.status = HttpStatus.UNAUTHORIZED.value()
@@ -46,6 +52,8 @@ class RateLimitFilter(
     private val rateLimitProperties: RateLimitProperties,
 ) : OncePerRequestFilter() {
 
+    private val log = LoggerFactory.getLogger(RateLimitFilter::class.java)
+
     override fun doFilterInternal(
         request: HttpServletRequest,
         response: HttpServletResponse,
@@ -62,28 +70,40 @@ class RateLimitFilter(
             return
         }
 
-        val clientKey = request.remoteAddr ?: "unknown"
+        val clientKey = rateLimitClientKey(request)
         val endpoint = endpointGroup(request)
         val redisKey = "ratelimit:$clientKey:$endpoint"
 
-        val count = redis.opsForValue().increment(redisKey) ?: 1L
-        if (count == 1L) {
-            redis.expire(redisKey, Duration.ofMinutes(1))
-        }
+        try {
+            val count = redis.opsForValue().increment(redisKey) ?: 1L
+            if (count == 1L) {
+                redis.expire(redisKey, Duration.ofMinutes(1))
+            }
 
-        val remaining = (limit - count).coerceAtLeast(0)
-        response.setHeader("X-RateLimit-Limit", limit.toString())
-        response.setHeader("X-RateLimit-Remaining", remaining.toString())
+            val remaining = (limit - count).coerceAtLeast(0)
+            response.setHeader("X-RateLimit-Limit", limit.toString())
+            response.setHeader("X-RateLimit-Remaining", remaining.toString())
 
-        if (count > limit) {
-            response.status = HttpStatus.TOO_MANY_REQUESTS.value()
-            response.setHeader("Retry-After", "60")
-            response.contentType = "application/json"
-            response.writer.write("""{"error":"Rate limit exceeded"}""")
-            return
+            if (count > limit) {
+                response.status = HttpStatus.TOO_MANY_REQUESTS.value()
+                response.setHeader("Retry-After", "60")
+                response.contentType = "application/json"
+                response.writer.write("""{"error":"Rate limit exceeded"}""")
+                return
+            }
+        } catch (ex: Exception) {
+            log.warn("Rate limit niedostępny (Redis) — pomijam limit: {}", ex.message)
         }
 
         filterChain.doFilter(request, response)
+    }
+
+    private fun rateLimitClientKey(request: HttpServletRequest): String {
+        val apiKey = request.getHeader("X-API-Key")
+        if (!apiKey.isNullOrBlank()) {
+            return "key:${apiKey.hashCode()}"
+        }
+        return "ip:${request.remoteAddr ?: "unknown"}"
     }
 
     private fun endpointGroup(request: HttpServletRequest): String =

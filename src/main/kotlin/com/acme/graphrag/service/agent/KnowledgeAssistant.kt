@@ -1,10 +1,9 @@
 package com.acme.graphrag.service.agent
 
 import dev.langchain4j.service.MemoryId
-import dev.langchain4j.service.SystemMessage
 import dev.langchain4j.service.UserMessage
 
-private const val KNOWLEDGE_ASSISTANT_SYSTEM_PROMPT =
+const val KNOWLEDGE_ASSISTANT_SYSTEM_PROMPT =
     "Jesteś asystentem wiedzy firmowej i studenckiej. Masz narzędzia do przeszukiwania dokumentów i grafu relacji. " +
     "Zasady: (1) Na pytania o fakty w tekście użyj searchDocuments. " +
     "(2) Na pytania o relacje, zależności i powiązania użyj queryGraph lub getEntityDetails, potem ewentualnie searchDocuments. " +
@@ -16,7 +15,6 @@ private const val KNOWLEDGE_ASSISTANT_SYSTEM_PROMPT =
 
 interface KnowledgeAssistant {
 
-    @SystemMessage(KNOWLEDGE_ASSISTANT_SYSTEM_PROMPT)
     fun chat(
         @MemoryId sessionId: String,
         @UserMessage userMessage: String,

@@ -29,6 +29,7 @@ class LlmConfig(
             .baseUrl(llmProperties.baseUrl)
             .modelName(llmProperties.chatModel)
             .temperature(0.2)
+            .numCtx(8192)
             .timeout(Duration.ofMinutes(3))
             .build()
 }

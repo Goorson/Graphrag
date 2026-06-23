@@ -1,7 +1,9 @@
 (function () {
   const SESSION_KEY = "graphrag.sessionId";
+  const API_KEY_STORAGE = "graphrag.apiKey";
   const POLL_INTERVAL_MS = 2000;
   const UPLOAD_TIMEOUT_MS = 600000;
+  const CHAT_TIMEOUT_MS = 180000;
 
   const messagesEl = document.getElementById("messages");
   const messageInput = document.getElementById("messageInput");
@@ -18,11 +20,66 @@
   let isSending = false;
   let isUploading = false;
 
+  function buildHeaders(extra = {}) {
+    const headers = { ...extra };
+    const apiKey = sessionStorage.getItem(API_KEY_STORAGE);
+    if (apiKey) {
+      headers["X-API-Key"] = apiKey;
+    }
+    return headers;
+  }
+
+  async function ensureApiKey() {
+    const config = await api("/api/ui-config", { skipApiKeyPrompt: true });
+    if (!config.apiKeyRequired) return;
+    if (sessionStorage.getItem(API_KEY_STORAGE)) return;
+
+    const entered = window.prompt("Podaj klucz API (X-API-Key):");
+    if (!entered) {
+      throw new Error("Wymagany klucz API");
+    }
+    sessionStorage.setItem(API_KEY_STORAGE, entered.trim());
+  }
+
   async function api(path, options = {}) {
-    const response = await fetch(path, {
-      headers: { "Content-Type": "application/json", ...options.headers },
-      ...options,
-    });
+    if (!options.skipApiKeyPrompt) {
+      await ensureApiKey();
+    }
+
+    const headers = buildHeaders(
+      options.body && !(options.body instanceof FormData)
+        ? { "Content-Type": "application/json", ...options.headers }
+        : { ...options.headers },
+    );
+
+    const controller = options.timeoutMs ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), options.timeoutMs)
+      : null;
+
+    let response;
+    try {
+      response = await fetch(path, {
+        ...options,
+        headers,
+        signal: controller?.signal,
+      });
+    } catch (err) {
+      if (err.name === "AbortError") {
+        const timeoutErr = new Error("Przekroczono limit czasu odpowiedzi — spróbuj ponownie.");
+        timeoutErr.status = 408;
+        throw timeoutErr;
+      }
+      throw err;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+
+    if (response.status === 401 && !options.skipApiKeyPrompt) {
+      sessionStorage.removeItem(API_KEY_STORAGE);
+      await ensureApiKey();
+      return api(path, { ...options, skipApiKeyPrompt: true });
+    }
 
     if (!response.ok) {
       let message = `Błąd ${response.status}`;
@@ -45,10 +102,39 @@
     return null;
   }
 
-  function appendMessage(role, text) {
+  function appendMessage(role, text, meta = {}) {
     const el = document.createElement("div");
     el.className = `message message-${role}`;
-    el.textContent = text;
+    const textNode = document.createElement("div");
+    textNode.textContent = text;
+    el.appendChild(textNode);
+
+    if (meta.sources && meta.sources.length > 0) {
+      const sourcesBlock = document.createElement("div");
+      sourcesBlock.className = "message-sources";
+      const title = document.createElement("div");
+      title.className = "message-sources-title";
+      title.textContent = "Źródła";
+      sourcesBlock.appendChild(title);
+      meta.sources.forEach((source) => {
+        const item = document.createElement("div");
+        item.className = "message-source-item";
+        const location = [source.filename, source.section, source.page ? `str. ${source.page}` : null]
+          .filter(Boolean)
+          .join(" · ");
+        item.textContent = `[${source.index}] ${location} — ${source.excerpt}`;
+        sourcesBlock.appendChild(item);
+      });
+      el.appendChild(sourcesBlock);
+    }
+
+    if (meta.degraded) {
+      const badge = document.createElement("div");
+      badge.className = "message-degraded";
+      badge.textContent = "Tryb ograniczony (graf niedostępny)";
+      el.appendChild(badge);
+    }
+
     messagesEl.appendChild(el);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return el;
@@ -62,7 +148,7 @@
     const el = document.createElement("div");
     el.className = "message message-loading";
     el.id = "loadingIndicator";
-    el.textContent = "Myślę…";
+    el.textContent = "Myślę… (pierwsze pytanie może potrwać 1–2 min)";
     messagesEl.appendChild(el);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return el;
@@ -192,8 +278,8 @@
     sendBtn.disabled = true;
     messageInput.disabled = true;
 
-    appendMessage("user", content.trim());
     messageInput.value = "";
+    appendMessage("user", content.trim());
     showLoading();
 
     try {
@@ -201,15 +287,23 @@
       const result = await api(`/api/chat/sessions/${sessionId}/messages`, {
         method: "POST",
         body: JSON.stringify({ content: content.trim() }),
+        timeoutMs: CHAT_TIMEOUT_MS,
       });
       removeLoading();
-      appendMessage("assistant", result.answer);
+      appendMessage("assistant", result.answer, {
+        sources: result.sources,
+        degraded: result.degraded,
+      });
     } catch (err) {
       removeLoading();
       if (err.status === 429) {
         appendSystemMessage("Za dużo zapytań — spróbuj za chwilę.");
       } else if (err.status === 503) {
         appendSystemMessage("Usługa AI chwilowo niedostępna — spróbuj ponownie za 30 s.");
+      } else if (err.status === 408) {
+        appendSystemMessage(err.message || "Przekroczono limit czasu odpowiedzi.");
+      } else if (err.status === 500) {
+        appendSystemMessage(err.message || "Wystąpił błąd podczas przetwarzania pytania.");
       } else {
         appendSystemMessage(err.message || "Wystąpił błąd podczas wysyłania wiadomości.");
       }
@@ -250,13 +344,20 @@
     setUploadStatus(`Wysyłanie ${file.name}…`, "indexing");
 
     try {
+      await ensureApiKey();
       const formData = new FormData();
       formData.append("file", file);
 
       const response = await fetch("/api/documents/upload", {
         method: "POST",
+        headers: buildHeaders(),
         body: formData,
       });
+
+      if (response.status === 401) {
+        sessionStorage.removeItem(API_KEY_STORAGE);
+        throw new Error("Wymagany klucz API");
+      }
 
       if (!response.ok) {
         let message = `Błąd uploadu (${response.status})`;
@@ -332,6 +433,7 @@
 
   async function init() {
     try {
+      await api("/api/ui-config", { skipApiKeyPrompt: true });
       await ensureSession();
       await loadHistory();
       await loadDocuments();

@@ -9,6 +9,7 @@ import com.acme.graphrag.service.agent.ChatStepSummary
 import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -40,13 +41,12 @@ class ChatController(
     fun sendMessage(
         @PathVariable id: UUID,
         @Valid @RequestBody request: ChatMessageRequest,
-    ): ChatResponse {
-        return try {
+    ): ChatResponse =
+        try {
             chatAgentService.sendMessage(id, request.content).toResponse()
         } catch (ex: IllegalArgumentException) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, ex.message)
         }
-    }
 
     @GetMapping("/sessions/{id}/messages")
     fun listMessages(@PathVariable id: UUID): List<SessionMessageResponse> {
@@ -76,7 +76,7 @@ data class CreateSessionResponse(
 )
 
 data class ChatMessageRequest(
-    @field:NotBlank val content: String,
+    @field:NotBlank @field:Size(max = 4000) val content: String,
 )
 
 data class ChatResponse(
@@ -84,6 +84,7 @@ data class ChatResponse(
     val sources: List<SourceResponse>,
     val steps: List<ChatStepResponse>,
     val latencyMs: Long,
+    val degraded: Boolean = false,
 )
 
 data class ChatStepResponse(
@@ -125,6 +126,7 @@ private fun ChatAgentResult.toResponse() = ChatResponse(
     },
     steps = steps.map { it.toResponse() },
     latencyMs = latencyMs,
+    degraded = degraded,
 )
 
 private fun ChatStepSummary.toResponse() = ChatStepResponse(

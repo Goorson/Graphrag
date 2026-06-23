@@ -6,8 +6,10 @@ import com.acme.graphrag.repository.ChatSessionRepository
 import com.acme.graphrag.repository.SessionMessage
 import com.acme.graphrag.repository.SessionMessageRepository
 import com.acme.graphrag.repository.SessionMessageRole
+import com.acme.graphrag.service.SourceCitation
 import com.acme.graphrag.service.graphrag.GraphRagService
 import io.micrometer.core.instrument.MeterRegistry
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -15,9 +17,10 @@ import kotlin.system.measureTimeMillis
 
 data class ChatAgentResult(
     val answer: String,
-    val sources: List<com.acme.graphrag.service.SourceCitation>,
+    val sources: List<SourceCitation>,
     val steps: List<ChatStepSummary>,
     val latencyMs: Long,
+    val degraded: Boolean = false,
 )
 
 data class ChatStepSummary(
@@ -37,6 +40,8 @@ class ChatAgentService(
     private val meterRegistry: MeterRegistry,
 ) {
 
+    private val log = LoggerFactory.getLogger(javaClass)
+
     fun createSession(requestedId: UUID? = null): UUID {
         val id = requestedId ?: UUID.randomUUID()
         if (chatSessionRepository.exists(id)) {
@@ -52,50 +57,61 @@ class ChatAgentService(
             throw IllegalArgumentException("Sesja nie istnieje: $sessionId")
         }
 
-        return try {
-            sendMessageInternal(sessionId, content.trim())
-        } catch (ex: Exception) {
-            meterRegistry.counter("agent.requests.failed").increment()
-            ChatAgentResult(
-                answer = "Wystąpił błąd podczas przetwarzania pytania. Spróbuj ponownie lub rozpocznij nową rozmowę.",
-                sources = emptyList(),
-                steps = emptyList(),
-                latencyMs = 0,
-            )
-        }
-    }
-
-    private fun sendMessageInternal(sessionId: UUID, content: String): ChatAgentResult {
-        val history = loadVisibleHistory(sessionId)
-        val questionWithContext = buildQuestionWithHistory(history, content)
+        val question = content.trim()
+        val historyBefore = loadVisibleHistory(sessionId)
+        log.info(
+            "Chat request: sessionId={} historyMessages={} question={}",
+            sessionId,
+            historyBefore.size,
+            question.take(200),
+        )
 
         sessionMessageRepository.insert(
             id = UUID.randomUUID(),
             sessionId = sessionId,
             role = SessionMessageRole.USER,
-            content = content,
+            content = question,
         )
 
-        lateinit var ragResult: com.acme.graphrag.service.AskResult
+        val questionWithContext = buildQuestionWithHistory(historyBefore, question)
+
+        lateinit var result: com.acme.graphrag.service.AskResult
         val latencyMs = measureTimeMillis {
             meterRegistry.counter("agent.requests.total").increment()
-            ragResult = graphRagService.ask(questionWithContext, RetrievalMode.GRAPH_RAG)
+            try {
+                result = graphRagService.ask(questionWithContext, RetrievalMode.GRAPH_RAG)
+            } catch (ex: Exception) {
+                meterRegistry.counter("agent.requests.failed").increment()
+                log.error(
+                    "Chat failed: sessionId={} question={} type={}",
+                    sessionId,
+                    question.take(200),
+                    ex.javaClass.simpleName,
+                    ex,
+                )
+                val message = "Wystąpił błąd podczas przetwarzania pytania. Spróbuj ponownie lub rozpocznij nową rozmowę."
+                persistAssistantMessage(sessionId, message)
+                throw ChatAgentException(message, ex)
+            }
         }
 
-        sessionMessageRepository.insert(
-            id = UUID.randomUUID(),
-            sessionId = sessionId,
-            role = SessionMessageRole.ASSISTANT,
-            content = ragResult.answer,
-        )
-
+        persistAssistantMessage(sessionId, result.answer)
         meterRegistry.timer("agent.latency").record(latencyMs, TimeUnit.MILLISECONDS)
 
+        log.info(
+            "Chat completed: sessionId={} sources={} latencyMs={} degraded={}",
+            sessionId,
+            result.sources.size,
+            latencyMs,
+            result.degraded,
+        )
+
         return ChatAgentResult(
-            answer = ragResult.answer,
-            sources = ragResult.sources,
+            answer = result.answer,
+            sources = result.sources,
             steps = emptyList(),
             latencyMs = latencyMs,
+            degraded = result.degraded,
         )
     }
 
@@ -109,6 +125,10 @@ class ChatAgentService(
             .filter { message ->
                 message.role != SessionMessageRole.ASSISTANT ||
                     !message.content.contains("toolName =")
+            }
+            .filter { message ->
+                message.role != SessionMessageRole.ASSISTANT ||
+                    !message.content.startsWith("Wystąpił błąd podczas przetwarzania pytania")
             }
 
     private fun buildQuestionWithHistory(history: List<SessionMessage>, currentQuestion: String): String {
@@ -130,5 +150,16 @@ class ChatAgentService(
 
             Aktualne pytanie użytkownika: $currentQuestion
             """.trimIndent()
+    }
+
+    private fun persistAssistantMessage(sessionId: UUID, content: String): UUID {
+        val id = UUID.randomUUID()
+        sessionMessageRepository.insert(
+            id = id,
+            sessionId = sessionId,
+            role = SessionMessageRole.ASSISTANT,
+            content = content,
+        )
+        return id
     }
 }

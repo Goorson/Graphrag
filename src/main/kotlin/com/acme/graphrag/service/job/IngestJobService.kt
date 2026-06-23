@@ -5,6 +5,7 @@ import com.acme.graphrag.domain.IngestJobStatus
 import com.acme.graphrag.domain.IngestJobType
 import com.acme.graphrag.repository.IngestJobRepository
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.acme.graphrag.util.ProjectPaths
 import org.springframework.stereotype.Service
 import org.springframework.web.multipart.MultipartFile
 import java.nio.file.Files
@@ -21,6 +22,7 @@ class IngestJobService(
 
     fun enqueuePath(relativePath: String): JobCreated {
         val normalized = relativePath.replace('\\', '/')
+        ProjectPaths.resolveRelative(normalized)
         require(ingestJobRepository.countActiveForPath(normalized) == 0) {
             "Trwa już indeksowanie dla ścieżki: $normalized"
         }
@@ -34,21 +36,25 @@ class IngestJobService(
 
     fun enqueueUpload(file: MultipartFile): JobCreated {
         val originalName = file.originalFilename ?: "upload.md"
+        val safeName = ProjectPaths.safeFilename(originalName)
         require(
-            originalName.endsWith(".md", ignoreCase = true) ||
-                originalName.endsWith(".pdf", ignoreCase = true),
+            safeName.endsWith(".md", ignoreCase = true) ||
+                safeName.endsWith(".pdf", ignoreCase = true),
         ) {
             "Obsługiwane rozszerzenia: .md, .pdf"
         }
 
         val uploadsDir = Path.of(System.getProperty("user.dir"), "uploads")
         Files.createDirectories(uploadsDir)
-        val target = uploadsDir.resolve(originalName)
+        val target = uploadsDir.resolve(safeName).normalize()
+        require(target.startsWith(uploadsDir.toAbsolutePath().normalize())) {
+            "Nieprawidłowa ścieżka pliku"
+        }
         file.inputStream.use { input ->
             Files.newOutputStream(target).use { output -> input.copyTo(output) }
         }
 
-        val relativePath = "uploads/$originalName"
+        val relativePath = "uploads/$safeName"
         require(ingestJobRepository.countActiveForPath(relativePath) == 0) {
             "Trwa już indeksowanie dla pliku: $relativePath"
         }
@@ -61,6 +67,7 @@ class IngestJobService(
 
     fun enqueueFolder(folder: String = "data/documents"): JobCreated {
         val normalized = folder.replace('\\', '/')
+        ProjectPaths.resolveRelative(normalized)
         val payload = FolderIngestPayload(folder = normalized)
         return createAndEnqueue(
             type = IngestJobType.FOLDER_SCAN,

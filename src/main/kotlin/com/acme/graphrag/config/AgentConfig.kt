@@ -1,6 +1,7 @@
 package com.acme.graphrag.config
 
 import com.acme.graphrag.service.agent.KnowledgeAssistant
+import com.acme.graphrag.service.agent.KNOWLEDGE_ASSISTANT_SYSTEM_PROMPT
 import com.acme.graphrag.service.agent.KnowledgeTools
 import com.acme.graphrag.service.agent.PersistentChatMemoryStore
 import dev.langchain4j.memory.chat.ChatMemoryProvider
@@ -45,5 +46,6 @@ class AgentConfig(
             .chatLanguageModel(chatLanguageModel)
             .tools(knowledgeTools)
             .chatMemoryProvider(chatMemoryProvider)
+            .systemMessageProvider { KNOWLEDGE_ASSISTANT_SYSTEM_PROMPT }
             .build()
 }

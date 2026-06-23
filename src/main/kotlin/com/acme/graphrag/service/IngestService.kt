@@ -8,6 +8,7 @@ import com.acme.graphrag.repository.ChunkRepository
 import com.acme.graphrag.repository.DocumentRepository
 import com.acme.graphrag.service.chunking.MarkdownChunker
 import com.acme.graphrag.service.chunking.PdfTextExtractor
+import com.acme.graphrag.util.ProjectPaths
 import org.springframework.stereotype.Service
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileVisitResult
@@ -181,10 +182,8 @@ class IngestService(
         )
     }
 
-    private fun resolveProjectPath(relativePath: String): Path {
-        val userDir = Path.of(System.getProperty("user.dir"))
-        return userDir.resolve(relativePath).normalize()
-    }
+    private fun resolveProjectPath(relativePath: String): Path =
+        ProjectPaths.resolveRelative(relativePath)
 
     private fun sha256(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256")

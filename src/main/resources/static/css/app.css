@@ -258,6 +258,35 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+.message-sources {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.message-sources-title {
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  color: var(--text);
+}
+
+.message-source-item {
+  margin-bottom: 0.25rem;
+}
+
+.message-degraded {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--warning);
+  background: #fef3c7;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+}
+
 .message-system {
   align-self: center;
   background: transparent;
