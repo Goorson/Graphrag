@@ -14,6 +14,7 @@ import com.acme.graphrag.service.SourceCitation
 import com.acme.graphrag.service.graph.GraphRetrievalService
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.acme.graphrag.repository.QueryLogRepository
+import com.acme.graphrag.service.SourceCitationFilter
 import io.micrometer.core.instrument.MeterRegistry
 import org.springframework.stereotype.Service
 import java.util.UUID
@@ -34,25 +35,31 @@ class GraphRagService(
     private val meterRegistry: MeterRegistry,
 ) {
 
-    fun ask(question: String, mode: RetrievalMode): AskResult {
+    fun ask(
+        question: String,
+        mode: RetrievalMode,
+        retrievalQuery: String? = null,
+    ): AskResult {
+        val searchQuery = retrievalQuery?.trim()?.takeIf { it.isNotEmpty() }
         return when (mode) {
-            RetrievalMode.VECTOR, RetrievalMode.HYBRID -> ragService.ask(question, mode)
+            RetrievalMode.VECTOR, RetrievalMode.HYBRID -> ragService.ask(question, mode, retrievalQuery = searchQuery)
             RetrievalMode.GRAPH -> graphOnly(question)
-            RetrievalMode.GRAPH_RAG -> graphRag(question)
+            RetrievalMode.GRAPH_RAG -> graphRag(question, searchQuery)
         }
     }
 
-    private fun graphRag(question: String): AskResult {
+    private fun graphRag(question: String, retrievalQuery: String?): AskResult {
         val trimmedQuestion = question.trim()
+        val searchQuery = retrievalQuery ?: trimmedQuestion
         meterRegistry.counter("ask.requests.total", "mode", RetrievalMode.GRAPH_RAG.name).increment()
-        val analysis = queryAnalyzer.analyze(trimmedQuestion)
+        val analysis = queryAnalyzer.analyze(searchQuery)
 
         lateinit var result: AskResult
         val latencyMs = measureTimeMillis {
             result = when (analysis.type) {
-                QueryType.FACTUAL -> factualGraphRag(trimmedQuestion, analysis)
-                QueryType.RELATIONAL -> relationalGraphRag(trimmedQuestion, analysis)
-                QueryType.HYBRID -> hybridGraphRag(trimmedQuestion, analysis)
+                QueryType.FACTUAL -> factualGraphRag(trimmedQuestion, searchQuery, analysis)
+                QueryType.RELATIONAL -> relationalGraphRag(trimmedQuestion, searchQuery, analysis)
+                QueryType.HYBRID -> hybridGraphRag(trimmedQuestion, searchQuery, analysis)
             }
         }
 
@@ -68,8 +75,17 @@ class GraphRagService(
     private fun withDegradedIfNeeded(result: AskResult): AskResult =
         if (neo4jAvailability.degraded) result.copy(degraded = true) else result
 
-    private fun factualGraphRag(question: String, analysis: com.acme.graphrag.domain.QueryAnalysis): AskResult {
-        val ragResult = ragService.ask(question, RetrievalMode.HYBRID, persistLog = false)
+    private fun factualGraphRag(
+        question: String,
+        searchQuery: String,
+        analysis: com.acme.graphrag.domain.QueryAnalysis,
+    ): AskResult {
+        val ragResult = ragService.ask(
+            question = question,
+            mode = RetrievalMode.HYBRID,
+            persistLog = false,
+            retrievalQuery = searchQuery,
+        )
         return ragResult.copy(
             retrievalMode = RetrievalMode.GRAPH_RAG,
             graphContext = null,
@@ -77,29 +93,47 @@ class GraphRagService(
         )
     }
 
-    private fun relationalGraphRag(question: String, analysis: com.acme.graphrag.domain.QueryAnalysis): AskResult {
+    private fun relationalGraphRag(
+        question: String,
+        searchQuery: String,
+        analysis: com.acme.graphrag.domain.QueryAnalysis,
+    ): AskResult {
         val graphContext = graphRetrievalService.retrieve(analysis.entities)
         if (!hasGraphHit(graphContext)) {
-            val fallback = ragService.ask(question, RetrievalMode.HYBRID, persistLog = false)
+            val fallback = ragService.ask(
+                question = question,
+                mode = RetrievalMode.HYBRID,
+                persistLog = false,
+                retrievalQuery = searchQuery,
+            )
             return fallback.copy(
                 retrievalMode = RetrievalMode.GRAPH_RAG,
                 degraded = true,
             )
         }
 
-        return answerWithGraphAndChunks(question, graphContext, RetrievalMode.GRAPH_RAG)
+        return answerWithGraphAndChunks(question, searchQuery, graphContext, RetrievalMode.GRAPH_RAG)
     }
 
-    private fun hybridGraphRag(question: String, analysis: com.acme.graphrag.domain.QueryAnalysis): AskResult {
+    private fun hybridGraphRag(
+        question: String,
+        searchQuery: String,
+        analysis: com.acme.graphrag.domain.QueryAnalysis,
+    ): AskResult {
         val graphContext = graphRetrievalService.retrieve(analysis.entities)
         if (!hasGraphHit(graphContext)) {
-            val fallback = ragService.ask(question, RetrievalMode.HYBRID, persistLog = false)
+            val fallback = ragService.ask(
+                question = question,
+                mode = RetrievalMode.HYBRID,
+                persistLog = false,
+                retrievalQuery = searchQuery,
+            )
             return fallback.copy(
                 retrievalMode = RetrievalMode.GRAPH_RAG,
                 degraded = true,
             )
         }
-        return answerWithGraphAndChunks(question, graphContext, RetrievalMode.GRAPH_RAG)
+        return answerWithGraphAndChunks(question, searchQuery, graphContext, RetrievalMode.GRAPH_RAG)
     }
 
     private fun graphOnly(question: String): AskResult {
@@ -140,14 +174,15 @@ class GraphRagService(
 
     private fun answerWithGraphAndChunks(
         question: String,
+        searchQuery: String,
         graphContext: GraphContext,
         mode: RetrievalMode,
     ): AskResult {
-        val queryEmbedding = embeddingService.embedOne(question)
+        val queryEmbedding = embeddingService.embedOne(searchQuery)
         val documentFilter = graphContext.documentIds.takeIf { it.isNotEmpty() }
         var matches = hybridRetrievalService.retrieve(
             queryEmbedding = queryEmbedding,
-            question = question,
+            question = searchQuery,
             mode = RetrievalMode.HYBRID,
             documentIds = documentFilter,
         )
@@ -155,7 +190,7 @@ class GraphRagService(
         if (matches.isEmpty()) {
             matches = hybridRetrievalService.retrieve(
                 queryEmbedding = queryEmbedding,
-                question = question,
+                question = searchQuery,
                 mode = RetrievalMode.HYBRID,
                 documentIds = null,
             )
@@ -187,11 +222,16 @@ class GraphRagService(
 
         val prompt = contextBuilder.buildPrompt(graphContext, sources, matches, question)
         val answer = llmGateway.generate(prompt).trim()
+        val usedSources = SourceCitationFilter.filterUsedSources(
+            answer = answer,
+            sources = sources,
+            chunkContents = matches.map { it.content },
+        )
 
         return withDegradedIfNeeded(
             AskResult(
                 answer = answer,
-                sources = sources,
+                sources = usedSources,
                 retrievalMode = mode,
                 latencyMs = 0,
                 graphContext = graphContext,

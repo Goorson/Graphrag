@@ -11,6 +11,7 @@ import java.util.UUID
 class HybridRetrievalService(
     private val chunkRepository: ChunkRepository,
     private val ragProperties: RagProperties,
+    private val documentChunkExpander: DocumentChunkExpander,
 ) {
 
     fun retrieve(
@@ -48,10 +49,13 @@ class HybridRetrievalService(
             byId.putIfAbsent(id, hit)
         }
 
-        return scores.entries
-            .sortedByDescending { it.value }
-            .take(ragProperties.topK)
-            .map { (id, score) -> byId.getValue(id).copy(score = score) }
+        return documentChunkExpander.expand(
+            hits = scores.entries
+                .sortedByDescending { it.value }
+                .take(ragProperties.topK)
+                .map { (id, score) -> byId.getValue(id).copy(score = score) },
+            searchQuery = question,
+        )
     }
 
     private fun rrf(rank: Int, k: Int = RRF_K): Double = 1.0 / (k + rank)

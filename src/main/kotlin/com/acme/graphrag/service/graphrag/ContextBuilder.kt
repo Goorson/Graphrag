@@ -17,10 +17,16 @@ class ContextBuilder {
         val graphSection = buildGraphSection(graphContext)
         val chunkSection = buildChunkSection(sources, matches)
 
+        val conversationRule = if (question.contains("Aktualne pytanie użytkownika:")) {
+            "- Uwzględnij kontekst wcześniejszej rozmowy przy interpretacji ostatniego pytania użytkownika.\n"
+        } else {
+            ""
+        }
+
         return """
             Jesteś asystentem odpowiadającym WYŁĄCZNIE na podstawie podanych sekcji kontekstu.
             Zasady:
-            - Relacje (kto z kim pracuje, zależności) wolno wyciągać TYLKO z sekcji "Relacje (graf wiedzy)".
+            ${conversationRule}- Relacje (kto z kim pracuje, zależności) wolno wyciągać TYLKO z sekcji "Relacje (graf wiedzy)".
             - Fakty szczegółowe (daty, opisy, ryzyka) z sekcji "Fragmenty dokumentów".
             - Jeśli odpowiedzi nie ma w kontekście, napisz dokładnie: "Nie znalazłem tej informacji w dokumentach."
             - Cytuj źródła numerami [n] dla fragmentów dokumentów.

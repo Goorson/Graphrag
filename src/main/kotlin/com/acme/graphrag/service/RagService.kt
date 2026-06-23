@@ -25,9 +25,11 @@ class RagService(
         question: String,
         mode: RetrievalMode = RetrievalMode.HYBRID,
         persistLog: Boolean = true,
+        retrievalQuery: String? = null,
     ): AskResult {
         val trimmedQuestion = question.trim()
         require(trimmedQuestion.isNotEmpty()) { "Pytanie nie może być puste" }
+        val searchQuery = retrievalQuery?.trim()?.takeIf { it.isNotEmpty() } ?: trimmedQuestion
 
         if (chunkRepository.count() == 0) {
             return AskResult(
@@ -41,8 +43,8 @@ class RagService(
         lateinit var result: AskResult
         val latencyMs = measureTimeMillis {
             meterRegistry.counter("ask.requests.total", "mode", mode.name).increment()
-            val queryEmbedding = embeddingService.embedOne(trimmedQuestion)
-            val matches = hybridRetrievalService.retrieve(queryEmbedding, trimmedQuestion, mode)
+            val queryEmbedding = embeddingService.embedOne(searchQuery)
+            val matches = hybridRetrievalService.retrieve(queryEmbedding, searchQuery, mode)
 
             if (matches.isEmpty()) {
                 meterRegistry.counter("ask.sources.empty", "mode", mode.name).increment()
@@ -68,10 +70,15 @@ class RagService(
 
             val contextBlock = buildContextBlock(sources, matches)
             val prompt = buildPrompt(contextBlock, trimmedQuestion)
-            val answer = llmGateway.generate(prompt)
-            result = AskResult(
-                answer = answer.trim(),
+            val answer = llmGateway.generate(prompt).trim()
+            val usedSources = SourceCitationFilter.filterUsedSources(
+                answer = answer,
                 sources = sources,
+                chunkContents = matches.map { it.content },
+            )
+            result = AskResult(
+                answer = answer,
+                sources = usedSources,
                 retrievalMode = mode,
                 latencyMs = 0,
             )
@@ -120,11 +127,25 @@ class RagService(
             "[${source.index}] ($location)\n${match.content.trim()}"
         }.joinToString(separator = "\n\n")
 
-    private fun buildPrompt(context: String, question: String): String =
-        """
+    private fun buildPrompt(context: String, question: String): String {
+        val hasConversation = question.contains("Aktualne pytanie użytkownika:")
+        val conversationRule = if (hasConversation) {
+            "- Uwzględnij kontekst wcześniejszej rozmowy przy interpretacji ostatniego pytania użytkownika.\n"
+        } else {
+            ""
+        }
+        val employmentRule = if (isEmploymentQuestion(question)) {
+            """
+            - Pytanie dotyczy historii zatrudnienia / CV: wypisz chronologicznie firmy, stanowiska i daty znalezione w kontekście.
+            - Przeszukaj wszystkie fragmenty tego samego CV — starsze pozycje mogą być w innym fragmencie niż bieżąca praca.
+            """.trimIndent() + "\n"
+        } else {
+            ""
+        }
+        return """
         Jesteś asystentem odpowiadającym WYŁĄCZNIE na podstawie podanego kontekstu.
         Zasady:
-        - Jeśli odpowiedzi nie ma w kontekście, napisz dokładnie: "Nie znalazłem tej informacji w dokumentach."
+        ${conversationRule}${employmentRule}- Jeśli odpowiedzi nie ma w kontekście, napisz dokładnie: "Nie znalazłem tej informacji w dokumentach."
         - Cytuj źródła numerami w nawiasach kwadratowych, np. [1].
         - Nie wymyślaj faktów.
 
@@ -133,11 +154,16 @@ class RagService(
 
         Pytanie: $question
         """.trimIndent()
+    }
 
     private fun excerpt(content: String, maxLength: Int = 240): String {
         val singleLine = content.replace(Regex("\\s+"), " ").trim()
         return if (singleLine.length <= maxLength) singleLine else singleLine.take(maxLength) + "…"
     }
+
+    private fun isEmploymentQuestion(question: String): Boolean =
+        Regex("""(?i)zatrudnien|employment|pracowa|praca|karier|historia|cv|resume|doświadczen|doswiadczen|experience""")
+            .containsMatchIn(question)
 }
 
 data class AskResult(

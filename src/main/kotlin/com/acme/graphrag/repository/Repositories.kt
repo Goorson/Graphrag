@@ -243,6 +243,20 @@ class ChunkRepository(
     fun count(): Int =
         jdbcTemplate.queryForObject("SELECT COUNT(*) FROM chunks", Int::class.java) ?: 0
 
+    fun findAllByDocumentId(documentId: UUID): List<ChunkSearchResult> =
+        jdbcTemplate.query(
+            """
+            SELECT c.id, c.document_id, c.content, c.section, c.page, d.path AS filename,
+                   1.0 AS score
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.document_id = ?
+            ORDER BY c.chunk_index
+            """.trimIndent(),
+            chunkRowMapper { 1.0 },
+            documentId,
+        )
+
     fun findById(chunkId: UUID): ChunkSearchResult? =
         jdbcTemplate.query(
             """
@@ -288,12 +302,20 @@ class ChunkRepository(
     }
 
     private fun toTsQuery(question: String): String? {
+        val stopwords = setOf(
+            "aby", "albo", "bez", "być", "byc", "czy", "dla", "do", "gdy", "gdzie", "jak", "jest",
+            "już", "juz", "która", "ktora", "które", "ktore", "który", "ktory", "nie", "od", "oraz",
+            "po", "pod", "przed", "przez", "przy", "się", "sie", "tak", "tej", "ten", "to", "w", "we",
+            "z", "za", "ze", "the", "and", "for", "with", "from", "that", "this", "what", "when",
+            "where", "which", "who", "how", "about",
+        )
         val terms = question.lowercase()
             .split(Regex("[^\\p{L}\\p{N}]+"))
-            .filter { it.length >= 2 }
+            .filter { it.length >= 3 && it !in stopwords }
             .distinct()
-            .take(8)
+            .sortedByDescending { it.length }
+            .take(6)
         if (terms.isEmpty()) return null
-        return terms.joinToString(" & ") { "$it:*" }
+        return terms.joinToString(" | ") { "$it:*" }
     }
 }

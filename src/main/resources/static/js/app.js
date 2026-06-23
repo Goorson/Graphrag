@@ -19,6 +19,7 @@
   let sessionId = localStorage.getItem(SESSION_KEY);
   let isSending = false;
   let isUploading = false;
+  let deletingDocumentId = null;
 
   function buildHeaders(extra = {}) {
     const headers = { ...extra };
@@ -110,12 +111,16 @@
     el.appendChild(textNode);
 
     if (meta.sources && meta.sources.length > 0) {
-      const sourcesBlock = document.createElement("div");
+      const sourcesBlock = document.createElement("details");
       sourcesBlock.className = "message-sources";
-      const title = document.createElement("div");
-      title.className = "message-sources-title";
-      title.textContent = "Źródła";
-      sourcesBlock.appendChild(title);
+
+      const summary = document.createElement("summary");
+      summary.className = "message-sources-summary";
+      summary.textContent = `Źródła (${meta.sources.length})`;
+      sourcesBlock.appendChild(summary);
+
+      const list = document.createElement("div");
+      list.className = "message-sources-list";
       meta.sources.forEach((source) => {
         const item = document.createElement("div");
         item.className = "message-source-item";
@@ -123,8 +128,9 @@
           .filter(Boolean)
           .join(" · ");
         item.textContent = `[${source.index}] ${location} — ${source.excerpt}`;
-        sourcesBlock.appendChild(item);
+        list.appendChild(item);
       });
+      sourcesBlock.appendChild(list);
       el.appendChild(sourcesBlock);
     }
 
@@ -148,7 +154,7 @@
     const el = document.createElement("div");
     el.className = "message message-loading";
     el.id = "loadingIndicator";
-    el.textContent = "Myślę… (pierwsze pytanie może potrwać 1–2 min)";
+    el.textContent = "Myślę…";
     messagesEl.appendChild(el);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return el;
@@ -190,6 +196,12 @@
     docs.forEach((doc) => {
       const li = document.createElement("li");
       li.className = "document-item";
+      if (deletingDocumentId === doc.id) {
+        li.classList.add("document-item--deleting");
+      }
+
+      const main = document.createElement("div");
+      main.className = "document-item-main";
 
       const name = document.createElement("div");
       name.className = "document-name";
@@ -209,10 +221,44 @@
 
       badges.appendChild(statusBadge);
       badges.appendChild(graphBadge);
-      li.appendChild(name);
-      li.appendChild(badges);
+      main.appendChild(name);
+      main.appendChild(badges);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "btn btn-ghost btn-delete-document";
+      deleteBtn.title = "Usuń dokument";
+      deleteBtn.setAttribute("aria-label", `Usuń dokument ${doc.filename || doc.path}`);
+      deleteBtn.textContent = "Usuń";
+      deleteBtn.disabled = deletingDocumentId === doc.id;
+      deleteBtn.addEventListener("click", () => deleteDocument(doc));
+
+      li.appendChild(main);
+      li.appendChild(deleteBtn);
       documentList.appendChild(li);
     });
+  }
+
+  async function deleteDocument(doc) {
+    const label = doc.filename || doc.path;
+    if (!window.confirm(`Usunąć „${label}”? Tej operacji nie można cofnąć.`)) {
+      return;
+    }
+
+    deletingDocumentId = doc.id;
+    await loadDocuments();
+
+    try {
+      await api(`/api/documents/${doc.id}`, { method: "DELETE" });
+      setUploadStatus(`Usunięto: ${label}`, "success");
+      appendSystemMessage(`Usunięto dokument „${label}”.`);
+      await loadDocuments();
+    } catch (err) {
+      setUploadStatus(err.message || "Usuwanie nie powiodło się", "error");
+    } finally {
+      deletingDocumentId = null;
+      await loadDocuments();
+    }
   }
 
   async function loadDocuments() {
@@ -318,7 +364,18 @@
   async function pollJob(jobId) {
     const deadline = Date.now() + UPLOAD_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      const status = await api(`/api/jobs/${jobId}`);
+      let status;
+      try {
+        status = await api(`/api/jobs/${jobId}`);
+      } catch (err) {
+        if (err.status === 429) {
+          const retryAfterSec = 5;
+          setUploadStatus(`Limit zapytań — ponawiam za ${retryAfterSec} s…`, "indexing");
+          await new Promise((r) => setTimeout(r, retryAfterSec * 1000));
+          continue;
+        }
+        throw err;
+      }
       setUploadStatus(`Indeksowanie… ${status.progressPct}% (${status.status})`, "indexing");
 
       if (status.status === "DONE") return status;
@@ -378,6 +435,9 @@
       appendSystemMessage(`Dodano plik „${file.name}” — możesz pytać o jego treść.`);
     } catch (err) {
       setUploadStatus(err.message || "Upload nie powiódł się", "error");
+      if (err.status === 429) {
+        appendSystemMessage("Za dużo zapytań podczas indeksowania — spróbuj ponownie za minutę.");
+      }
     } finally {
       isUploading = false;
       uploadBtn.disabled = false;

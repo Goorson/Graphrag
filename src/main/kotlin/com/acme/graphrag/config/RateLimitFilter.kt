@@ -85,6 +85,15 @@ class RateLimitFilter(
             response.setHeader("X-RateLimit-Remaining", remaining.toString())
 
             if (count > limit) {
+                log.warn(
+                    "Rate limit exceeded: client={} endpoint={} count={} limit={} method={} uri={}",
+                    clientKey,
+                    endpoint,
+                    count,
+                    limit,
+                    request.method,
+                    request.requestURI,
+                )
                 response.status = HttpStatus.TOO_MANY_REQUESTS.value()
                 response.setHeader("Retry-After", "60")
                 response.contentType = "application/json"
@@ -106,20 +115,25 @@ class RateLimitFilter(
         return "ip:${request.remoteAddr ?: "unknown"}"
     }
 
-    private fun endpointGroup(request: HttpServletRequest): String =
-        when {
-            request.requestURI.contains("/api/ask") -> "ask"
-            request.requestURI.contains("/api/chat") -> "chat"
-            request.requestURI.contains("/api/documents") -> "ingest"
-            request.requestURI.contains("/api/jobs") -> "ingest"
+    private fun endpointGroup(request: HttpServletRequest): String {
+        val uri = request.requestURI
+        return when {
+            uri.contains("/api/ask") -> "ask"
+            uri.contains("/api/chat") -> "chat"
+            uri.contains("/api/jobs") -> "jobs"
+            uri.contains("/api/documents") && request.method == "GET" -> "read"
+            uri.contains("/api/documents") -> "ingest"
             else -> "api"
         }
+    }
 
     private fun limitFor(request: HttpServletRequest): Int =
         when (endpointGroup(request)) {
             "ask" -> rateLimitProperties.askPerMinute
             "chat" -> rateLimitProperties.chatPerMinute
             "ingest" -> rateLimitProperties.ingestPerMinute
+            "jobs" -> rateLimitProperties.jobsPerMinute
+            "read" -> rateLimitProperties.askPerMinute
             else -> rateLimitProperties.askPerMinute
         }
 }

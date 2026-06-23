@@ -84,6 +84,7 @@ app:
     ask-per-minute: 30
     ingest-per-minute: 10
     chat-per-minute: 30
+    jobs-per-minute: 120
   security:
     api-key: ${API_KEY:}
   health:

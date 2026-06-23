@@ -35,6 +35,7 @@ data class RateLimitProperties(
     val askPerMinute: Int = 30,
     val ingestPerMinute: Int = 10,
     val chatPerMinute: Int = 30,
+    val jobsPerMinute: Int = 120,
 )
 
 @ConfigurationProperties(prefix = "app.security")

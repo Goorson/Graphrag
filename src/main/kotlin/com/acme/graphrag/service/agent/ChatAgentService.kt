@@ -74,12 +74,18 @@ class ChatAgentService(
         )
 
         val questionWithContext = buildQuestionWithHistory(historyBefore, question)
+        val retrievalQuery = ChatRetrievalQueryBuilder.build(historyBefore, question)
+        log.info("Chat retrieval query: sessionId={} query={}", sessionId, retrievalQuery.take(300))
 
         lateinit var result: com.acme.graphrag.service.AskResult
         val latencyMs = measureTimeMillis {
             meterRegistry.counter("agent.requests.total").increment()
             try {
-                result = graphRagService.ask(questionWithContext, RetrievalMode.GRAPH_RAG)
+                result = graphRagService.ask(
+                    question = questionWithContext,
+                    mode = RetrievalMode.GRAPH_RAG,
+                    retrievalQuery = retrievalQuery,
+                )
             } catch (ex: Exception) {
                 meterRegistry.counter("agent.requests.failed").increment()
                 log.error(

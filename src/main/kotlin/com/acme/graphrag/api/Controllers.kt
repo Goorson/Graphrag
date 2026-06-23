@@ -10,6 +10,7 @@ import com.acme.graphrag.service.AskResult
 import com.acme.graphrag.service.graphrag.GraphRagService
 import com.acme.graphrag.service.SourceCitation
 import com.acme.graphrag.service.job.IngestJobService
+import com.acme.graphrag.service.DocumentDeleteService
 import com.acme.graphrag.service.job.JobCreated
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
@@ -35,6 +36,7 @@ import java.util.UUID
 class DocumentController(
     private val ingestJobService: IngestJobService,
     private val documentRepository: DocumentRepository,
+    private val documentDeleteService: DocumentDeleteService,
 ) {
 
     @GetMapping("/documents")
@@ -49,7 +51,7 @@ class DocumentController(
     @DeleteMapping("/documents/{id}")
     @org.springframework.web.bind.annotation.ResponseStatus(HttpStatus.NO_CONTENT)
     fun deleteDocument(@PathVariable id: UUID) {
-        if (!documentRepository.deleteById(id)) {
+        if (!documentDeleteService.delete(id)) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, "Dokument nie istnieje")
         }
     }
